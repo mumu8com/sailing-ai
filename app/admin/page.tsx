@@ -7,12 +7,14 @@ type Profile={id:string;display_name:string|null;role:"user"|"content_manager"|"
 
 export default function AdminPage(){
  const [loading,setLoading]=useState(true),[allowed,setAllowed]=useState(false),[tab,setTab]=useState("overview"),[msg,setMsg]=useState("");
+ const [email,setEmail]=useState(""),[password,setPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginMode,setLoginMode]=useState(false);
  const [payments,setPayments]=useState<Payment[]>([]),[profiles,setProfiles]=useState<Profile[]>([]);
  const [bg,setBg]=useState("#06111d"),[primary,setPrimary]=useState("#1aa8b9"),[price,setPrice]=useState("10"),[trial,setTrial]=useState("30");
  useEffect(()=>{load()},[]);
  async function load(){
+  setLoading(true);
   const {data:{user}}=await supabase.auth.getUser();
-  if(!user){setLoading(false);return}
+  if(!user){setLoginMode(true);setLoading(false);return}
   const {data:p}=await supabase.from("profiles").select("role").eq("id",user.id).single();
   if(!p||!["admin","owner"].includes(p.role)){setMsg("لا تملك صلاحية الوصول إلى لوحة الإدارة.");setLoading(false);return}
   setAllowed(true);
@@ -25,6 +27,21 @@ export default function AdminPage(){
   if(users.data)setProfiles(users.data);
   if(settings.data){setBg(settings.data.background_color);setPrimary(settings.data.primary_color);setPrice(String(settings.data.monthly_price));setTrial(String(settings.data.trial_days))}
   setLoading(false);
+ }
+ async function login(){
+  if(loginBusy)return;
+  setMsg("");
+  if(!email.trim()||!password){setMsg("أدخل البريد الإلكتروني وكلمة المرور.");return}
+  setLoginBusy(true);
+  const {error}=await supabase.auth.signInWithPassword({email:email.trim(),password});
+  if(error){setMsg(error.message==="Invalid login credentials"?"البريد الإلكتروني أو كلمة المرور غير صحيحة.":error.message);setLoginBusy(false);return}
+  setLoginMode(false);
+  await load();
+  setLoginBusy(false);
+ }
+ async function logout(){
+  await supabase.auth.signOut();
+  setAllowed(false);setLoginMode(true);setPayments([]);setProfiles([]);
  }
  async function payment(id:string,status:"paid"|"rejected"){
   const {data:{user}}=await supabase.auth.getUser();if(!user)return;
@@ -40,13 +57,14 @@ export default function AdminPage(){
   if(error)setMsg(error.message);else setProfiles(x=>x.map(p=>p.id===id?{...p,role:value}:p));
  }
  if(loading)return <div className="admin-loading">جارٍ التحقق من صلاحية المدير…</div>;
- if(!allowed)return <div className="admin-denied" dir="rtl"><h1>لوحة الإدارة محمية</h1><p>{msg||"سجّل الدخول بحساب مدير."}</p><a href="/">العودة للموقع</a></div>;
+ if(loginMode)return <main className="admin-login" dir="rtl"><div className="admin-login-card"><div className="admin-brand"><div className="brand-mark">SA</div><div><strong>Sailing AI</strong><span>تسجيل دخول الإدارة</span></div></div><h1>تسجيل الدخول</h1><p>أدخل حساب المدير للوصول إلى لوحة الإدارة.</p>{msg&&<div className="admin-alert">{msg}</div>}<label>البريد الإلكتروني<input type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} placeholder="admin@example.com" onKeyDown={e=>{if(e.key==="Enter")login()}}/></label><label>كلمة المرور<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" onKeyDown={e=>{if(e.key==="Enter")login()}}/></label><button className="primary login-button" onClick={login} disabled={loginBusy}>{loginBusy?"جارٍ الدخول…":"دخول لوحة الإدارة"}</button><a href="/" className="back-link">← العودة للموقع</a></div></main>;
+ if(!allowed)return <div className="admin-denied" dir="rtl"><h1>لوحة الإدارة محمية</h1><p>{msg||"هذا الحساب ليس مديراً. استخدم حساب admin أو owner."}</p><button className="primary" onClick={()=>{setMsg("");setLoginMode(true)}}>تسجيل الدخول بحساب آخر</button><a href="/">العودة للموقع</a></div>;
  const revenue=payments.filter(p=>p.status==="paid").reduce((s,p)=>s+Number(p.amount),0);
  return <main className="admin-shell" style={{"--admin-bg":bg,"--admin-primary":primary} as React.CSSProperties} dir="rtl">
   <aside className="admin-sidebar"><div className="admin-brand"><div className="brand-mark">SA</div><div><strong>Sailing AI</strong><span>لوحة التحكم</span></div></div>
   <nav>{[["overview","نظرة عامة"],["payments","المدفوعات"],["appearance","الألوان والمظهر"],["users","المستخدمون والصلاحيات"]].map(([id,label])=><button key={id} className={tab===id?"selected":""} onClick={()=>setTab(id)}>{label}</button>)}</nav>
   <div className="admin-note">صلاحيات الإدارة محمية بقاعدة البيانات وRLS.</div></aside>
-  <section className="admin-main"><header className="admin-header"><div><span className="eyebrow">SAILING AI • ADMIN</span><h1>{tab==="overview"?"لوحة الإدارة":tab==="payments"?"المدفوعات":tab==="appearance"?"المظهر والألوان":"المستخدمون والصلاحيات"}</h1></div><a href="/" className="back-link">← الموقع</a></header>
+  <section className="admin-main"><header className="admin-header"><div><span className="eyebrow">SAILING AI • ADMIN</span><h1>{tab==="overview"?"لوحة الإدارة":tab==="payments"?"المدفوعات":tab==="appearance"?"المظهر والألوان":"المستخدمون والصلاحيات"}</h1></div><div className="admin-header-actions"><button className="logout-button" onClick={logout}>تسجيل الخروج</button><a href="/" className="back-link">← الموقع</a></div></header>
   {msg&&<div className="admin-alert">{msg}</div>}
   {tab==="overview"&&<div className="admin-content"><div className="stat-grid"><Stat title="الإيرادات" value={revenue+" د.ل"}/><Stat title="معلقة" value={String(payments.filter(p=>p.status==="pending").length)}/><Stat title="المدفوعات" value={String(payments.length)}/><Stat title="التجربة" value={trial+" يوم"}/></div><div className="admin-card"><h2>النظام متصل</h2><p>البيانات المعروضة الآن من Supabase وليست بيانات تجريبية.</p></div><PaymentTable payments={payments} onStatus={payment}/></div>}
   {tab==="payments"&&<div className="admin-content"><div className="admin-card"><h2>المدفوعات</h2><PaymentTable payments={payments} onStatus={payment}/></div><div className="admin-card"><h2>الاشتراك</h2><label>السعر الشهري<input value={price} onChange={e=>setPrice(e.target.value)}/></label><label>مدة التجربة<input value={trial} onChange={e=>setTrial(e.target.value)}/></label><button className="primary" onClick={save}>حفظ</button></div></div>}
