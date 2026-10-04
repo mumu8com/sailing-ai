@@ -20,10 +20,10 @@ export async function POST(req:Request){
   const model=process.env.SAILING_AI_MODEL||'openai/gpt-6.1-sol';
   const recent=messages.slice(-12).map((m:any)=>({role:m.role==='assistant'?'assistant':'user',content:String(m.content||'')}));
   if(!imageData){
-   const result=await generateText({model,messages:[{role:'system',content:system},{role:'user',content:`اللغة المطلوبة: ${language}\\n\\n`+recent.map((m:any)=>m.content).join('\\n')} ]});
+   const result=await generateText({model,instructions:system,messages:[{role:'user',content:`اللغة المطلوبة: ${language}\\n\\n`+recent.map((m:any)=>m.content).join('\\n')} ]});
    return NextResponse.json({answer:result.text||fallback(q),mode:'ai',model});
   }
-  const result=await generateText({model,messages:[{role:'system',content:system},{role:'user',content:[{type:'text',text:`اللغة المطلوبة: ${language}\\nحلّل هذه الصورة باعتبارها موقفاً في سباق شراع، واذكر القواعد ذات الصلة.\\n\\n${q}`},{type:'image',image:imageData}]}]});
+  const result=await generateText({model,instructions:system,messages:[{role:'user',content:[{type:'text',text:`اللغة المطلوبة: ${language}\\nحلّل هذه الصورة باعتبارها موقفاً في سباق شراع، واذكر القواعد ذات الصلة.\\n\\n${q}`},{type:'image',image:imageData}]}]});
   return NextResponse.json({answer:result.text||fallback(q),mode:'ai',model});
  }catch(error){
   console.error('Sailing AI request failed',error);
