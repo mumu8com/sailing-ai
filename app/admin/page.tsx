@@ -10,6 +10,7 @@ export default function AdminPage(){
  const [email,setEmail]=useState(""),[password,setPassword]=useState(""),[loginBusy,setLoginBusy]=useState(false),[loginMode,setLoginMode]=useState(false);
  const [payments,setPayments]=useState<Payment[]>([]),[profiles,setProfiles]=useState<Profile[]>([]);
  const [bg,setBg]=useState("#06111d"),[primary,setPrimary]=useState("#1aa8b9"),[price,setPrice]=useState("10"),[trial,setTrial]=useState("30");
+ const [bank,setBank]=useState<any>(null),[bankBusy,setBankBusy]=useState(false);
  useEffect(()=>{load()},[]);
  async function load(){
   setLoading(true);
@@ -21,11 +22,13 @@ export default function AdminPage(){
   const [pay,users,settings]=await Promise.all([
    supabase.from("payments").select("*").order("created_at",{ascending:false}),
    supabase.from("profiles").select("id,display_name,role").order("created_at",{ascending:false}),
-   supabase.from("site_settings").select("*").eq("id",true).single()
+   supabase.from("site_settings").select("*").eq("id",true).single(),
+   supabase.from("bank_accounts").select("*").order("display_order").limit(1).maybeSingle()
   ]);
   if(pay.data)setPayments(pay.data);
   if(users.data)setProfiles(users.data);
   if(settings.data){setBg(settings.data.background_color);setPrimary(settings.data.primary_color);setPrice(String(settings.data.monthly_price));setTrial(String(settings.data.trial_days))}
+  if(bank.data)setBank(bank.data);
   setLoading(false);
  }
  async function login(){
@@ -48,6 +51,11 @@ export default function AdminPage(){
   const {error}=await supabase.from("payments").update({status,reviewed_by:user.id,reviewed_at:new Date().toISOString()}).eq("id",id);
   if(error)setMsg(error.message);else setPayments(x=>x.map(p=>p.id===id?{...p,status}:p));
  }
+ async function saveBank(){
+  if(bankBusy||!bank)return; setBankBusy(true); setMsg("");
+  const {error}=await supabase.from("bank_accounts").update({bank_name:bank.bank_name,account_name:bank.account_name,account_number:bank.account_number,iban:bank.iban,branch:bank.branch,instructions:bank.instructions,is_active:!!bank.is_active,updated_at:new Date().toISOString()}).eq("id",bank.id);
+  setMsg(error?error.message:"تم حفظ بيانات التحويل البنكي بنجاح."); setBankBusy(false);
+ }
  async function save(){
   const {error}=await supabase.from("site_settings").update({background_color:bg,primary_color:primary,monthly_price:Number(price)||10,trial_days:Number(trial)||30,updated_at:new Date().toISOString()}).eq("id",true);
   setMsg(error?error.message:"تم حفظ الإعدادات.");
@@ -62,12 +70,13 @@ export default function AdminPage(){
  const revenue=payments.filter(p=>p.status==="paid").reduce((s,p)=>s+Number(p.amount),0);
  return <main className="admin-shell" style={{"--admin-bg":bg,"--admin-primary":primary} as React.CSSProperties} dir="rtl">
   <aside className="admin-sidebar"><div className="admin-brand"><div className="brand-mark">SA</div><div><strong>Sailing AI</strong><span>لوحة التحكم</span></div></div>
-  <nav>{[["overview","نظرة عامة"],["payments","المدفوعات"],["appearance","الألوان والمظهر"],["users","المستخدمون والصلاحيات"]].map(([id,label])=><button key={id} className={tab===id?"selected":""} onClick={()=>setTab(id)}>{label}</button>)}</nav>
+  <nav>{[["overview","نظرة عامة"],["payments","المدفوعات"],["bank","بيانات التحويل"],["appearance","الألوان والمظهر"],["users","المستخدمون والصلاحيات"]].map(([id,label])=><button key={id} className={tab===id?"selected":""} onClick={()=>setTab(id)}>{label}</button>)}</nav>
   <div className="admin-note">صلاحيات الإدارة محمية بقاعدة البيانات وRLS.</div></aside>
-  <section className="admin-main"><header className="admin-header"><div><span className="eyebrow">SAILING AI • ADMIN</span><h1>{tab==="overview"?"لوحة الإدارة":tab==="payments"?"المدفوعات":tab==="appearance"?"المظهر والألوان":"المستخدمون والصلاحيات"}</h1></div><div className="admin-header-actions"><button className="logout-button" onClick={logout}>تسجيل الخروج</button><a href="/" className="back-link">← الموقع</a></div></header>
+  <section className="admin-main"><header className="admin-header"><div><span className="eyebrow">SAILING AI • ADMIN</span><h1>{tab==="overview"?"لوحة الإدارة":tab==="payments"?"المدفوعات":tab==="bank"?"بيانات التحويل البنكي":tab==="appearance"?"المظهر والألوان":"المستخدمون والصلاحيات"}</h1></div><div className="admin-header-actions"><button className="logout-button" onClick={logout}>تسجيل الخروج</button><a href="/" className="back-link">← الموقع</a></div></header>
   {msg&&<div className="admin-alert">{msg}</div>}
   {tab==="overview"&&<div className="admin-content"><div className="stat-grid"><Stat title="الإيرادات" value={revenue+" د.ل"}/><Stat title="معلقة" value={String(payments.filter(p=>p.status==="pending").length)}/><Stat title="المدفوعات" value={String(payments.length)}/><Stat title="التجربة" value={trial+" يوم"}/></div><div className="admin-card"><h2>النظام متصل</h2><p>البيانات المعروضة الآن من Supabase وليست بيانات تجريبية.</p></div><PaymentTable payments={payments} onStatus={payment}/></div>}
   {tab==="payments"&&<div className="admin-content"><div className="admin-card"><h2>المدفوعات</h2><PaymentTable payments={payments} onStatus={payment}/></div><div className="admin-card"><h2>الاشتراك</h2><label>السعر الشهري<input value={price} onChange={e=>setPrice(e.target.value)}/></label><label>مدة التجربة<input value={trial} onChange={e=>setTrial(e.target.value)}/></label><button className="primary" onClick={save}>حفظ</button></div></div>}
+  {tab==="bank"&&<div className="admin-content"><div className="admin-card"><h2>بيانات الشراء والتحويل البنكي</h2><p>هذه البيانات تظهر للمستخدم عند الضغط على «ترقية» لإتمام التحويل وتسجيل الدفع.</p>{bank?<><label>اسم المصرف<input value={bank.bank_name||""} onChange={e=>setBank({...bank,bank_name:e.target.value})}/></label><label>اسم صاحب الحساب<input value={bank.account_name||""} onChange={e=>setBank({...bank,account_name:e.target.value})}/></label><label>رقم الحساب<input value={bank.account_number||""} onChange={e=>setBank({...bank,account_number:e.target.value})}/></label><label>IBAN<input value={bank.iban||""} onChange={e=>setBank({...bank,iban:e.target.value})}/></label><label>الفرع<input value={bank.branch||""} onChange={e=>setBank({...bank,branch:e.target.value})}/></label><label>تعليمات التحويل<textarea value={bank.instructions||""} onChange={e=>setBank({...bank,instructions:e.target.value})}/></label><label><input type="checkbox" checked={!!bank.is_active} onChange={e=>setBank({...bank,is_active:e.target.checked})}/> الحساب نشط ويظهر للمستخدمين</label><button className="primary" onClick={saveBank} disabled={bankBusy}>{bankBusy?"جارٍ الحفظ…":"حفظ بيانات التحويل"}</button></>:<p>لا يوجد حساب بنكي. أضف حساباً من قاعدة البيانات أولاً.</p>}</div></div>}
   {tab==="appearance"&&<div className="admin-content"><div className="admin-card"><h2>ألوان الموقع</h2><label>الخلفية<input type="color" value={bg} onChange={e=>setBg(e.target.value)}/></label><label>اللون الأساسي<input type="color" value={primary} onChange={e=>setPrimary(e.target.value)}/></label><div className="preview" style={{background:bg}}><div style={{background:primary}} className="preview-button">معاينة</div></div><button className="primary" onClick={save}>حفظ الألوان</button></div></div>}
   {tab==="users"&&<div className="admin-content"><div className="admin-card"><h2>المستخدمون والصلاحيات</h2>{profiles.map(p=><div className="user-row" key={p.id}><div><b>{p.display_name||"مستخدم"}</b><span>{p.id}</span></div><select value={p.role} onChange={e=>role(p.id,e.target.value as Profile["role"])}><option value="user">مستخدم</option><option value="content_manager">مدير محتوى</option><option value="admin">مدير</option><option value="owner">مالك</option></select></div>)}</div></div>}
   </section></main>
