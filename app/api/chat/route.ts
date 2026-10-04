@@ -14,10 +14,12 @@ export async function POST(req:Request){
   const body=await req.json();
   const messages=Array.isArray(body.messages)?body.messages:[];
   const q=String(messages.at(-1)?.content||'');
+  const imageData=typeof body.imageData==='string'?body.imageData:'';
+  const imageMime=typeof body.imageMime==='string'?body.imageMime:'image/jpeg';
   const key=process.env.AI_GATEWAY_API_KEY;
   if(!key)return NextResponse.json({answer:fallback(q),mode:'local'});
   const model=process.env.SAILING_AI_MODEL||'openai/gpt-6.1-sol';
-  const r=await fetch('https://ai-gateway.vercel.sh/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model,messages:[{role:'system',content:system},...messages.slice(-12)]})});
+  const r=await fetch('https://ai-gateway.vercel.sh/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model,messages:[{role:'system',content:system},...messages.slice(-12).map((m:any,i:number)=>{if(i===messages.slice(-12).length-1&&imageData)return {role:m.role,content:[{type:'text',text:String(m.content||'حلل هذه الصورة من موقف سباق الشراع.')},{type:'image_url',image_url:{url:imageData}}]};return m;})]})});
   if(!r.ok)return NextResponse.json({answer:fallback(q),mode:'fallback'});
   const d=await r.json();
   return NextResponse.json({answer:d?.choices?.[0]?.message?.content||fallback(q),mode:'ai',model});
