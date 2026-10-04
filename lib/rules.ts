@@ -1,0 +1,2 @@
+export const ruleTopics:Record<string,string>={"10":"ملبس معاكس","11":"نفس الملبس ومتداخل","12":"نفس الملبس وغير متداخل","13":"أثناء تغيير الملبس","14":"تجنب الاحتكاك","15":"اكتساب حق الطريق","16":"تغيير المسار","18":"مساحة العلامة","19":"مساحة المرور عند العائق","20":"طلب مساحة عند عائق","42":"الدفع"};
+export function findRules(text:string){return Object.keys(ruleTopics).filter(n=>text.includes(`قاعدة ${n}`)||new RegExp(`\\b${n}\\b`).test(text)).map(n=>({number:n,topic:ruleTopics[n]}))}
