@@ -27,7 +27,7 @@ export async function POST(req:Request){
   return NextResponse.json({answer:result.text||fallback(q),mode:'ai',model});
  }catch(error){
   console.error('Sailing AI request failed',error);
-  const bodyMessage='تعذر الاتصال بمحرك الذكاء الاصطناعي حالياً. حاول مرة أخرى.';
+  const hits=findRules(q); const bodyMessage=hits.length ? hits.map(r=>`القاعدة ${r.number} — ${r.topic}\n\nتعذر تشغيل المحرك الخارجي حالياً، وهذه إجابة أساسية من قاعدة القواعد المحلية. اذكر الملبس والتداخل واتجاه الريح والعلامة أو العائق وأي تغيير في المسار لتحليل الموقف.`).join('\n\n') : `تعذر تشغيل المحرك الخارجي حالياً. اكتب رقم القاعدة مثل القاعدة 10 أو صف موقف السباق بالتفصيل.`;
   return NextResponse.json({answer:bodyMessage,mode:'error'},{status:503});
  }
 }
