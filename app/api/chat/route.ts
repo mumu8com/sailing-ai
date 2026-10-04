@@ -11,23 +11,31 @@ function fallback(q:string){
 }
 
 export async function POST(req:Request){
+ let q='';
  try{
   const body=await req.json();
   const messages=Array.isArray(body.messages)?body.messages:[];
-  const q=String(messages.at(-1)?.content||'');
+  q=String(messages.at(-1)?.content||'');
   const language=String(body.language||'ar');
   const imageData=typeof body.imageData==='string'?body.imageData:'';
-  const model=process.env.SAILING_AI_MODEL||'openai/gpt-6.1-sol';
+  const imageMime=typeof body.imageMime==='string'&&body.imageMime.startsWith('image/')?body.imageMime:'image/jpeg';
+  const model=process.env.SAILING_AI_MODEL||'openai/gpt-5.6-sol';
   const recent=messages.slice(-12).map((m:any)=>({role:m.role==='assistant'?'assistant':'user',content:String(m.content||'')}));
   if(!imageData){
    const result=await generateText({model,instructions:system,messages:[{role:'user',content:`اللغة المطلوبة: ${language}\\n\\n`+recent.map((m:any)=>m.content).join('\\n')} ]});
    return NextResponse.json({answer:result.text||fallback(q),mode:'ai',model});
   }
-  const result=await generateText({model,instructions:system,messages:[{role:'user',content:[{type:'text',text:`اللغة المطلوبة: ${language}\\nحلّل هذه الصورة باعتبارها موقفاً في سباق شراع، واذكر القواعد ذات الصلة.\\n\\n${q}`},{type:'image',image:imageData}]}]});
+  const result=await generateText({model,instructions:system,messages:[{role:'user',content:[
+   {type:'text',text:`اللغة المطلوبة: ${language}\\nحلّل هذه الصورة باعتبارها موقفاً في سباق شراع، واذكر القواعد ذات الصلة.\\n\\n${q}`},
+   {type:'file',data:imageData,mediaType:imageMime}
+  ]}]});
   return NextResponse.json({answer:result.text||fallback(q),mode:'ai',model});
  }catch(error){
   console.error('Sailing AI request failed',error);
-  const hits=findRules(q); const bodyMessage=hits.length ? hits.map(r=>`القاعدة ${r.number} — ${r.topic}\n\nتعذر تشغيل المحرك الخارجي حالياً، وهذه إجابة أساسية من قاعدة القواعد المحلية. اذكر الملبس والتداخل واتجاه الريح والعلامة أو العائق وأي تغيير في المسار لتحليل الموقف.`).join('\n\n') : `تعذر تشغيل المحرك الخارجي حالياً. اكتب رقم القاعدة مثل القاعدة 10 أو صف موقف السباق بالتفصيل.`;
+  const hits=findRules(q);
+  const bodyMessage=hits.length
+   ? hits.map(r=>`القاعدة ${r.number} — ${r.topic}\\n\\nتعذر تشغيل المحرك الخارجي حالياً، وهذه إجابة أساسية من قاعدة القواعد المحلية. اذكر الملبس والتداخل واتجاه الريح والعلامة أو العائق وأي تغيير في المسار لتحليل الموقف.`).join('\\n\\n')
+   : `تعذر تشغيل المحرك الخارجي حالياً. اكتب رقم القاعدة مثل القاعدة 10 أو صف موقف السباق بالتفصيل.`;
   return NextResponse.json({answer:bodyMessage,mode:'error'},{status:503});
  }
 }
