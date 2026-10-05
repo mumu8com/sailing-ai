@@ -97,7 +97,7 @@ export async function POST(req: Request) {
       content: String(m.content || ""),
     }));
 
-    const model = process.env.SAILING_AI_MODEL || "gpt-5.6";
+    const model = process.env.SAILING_AI_MODEL || "gpt-5.6-sol";
     const instruction = `${SYSTEM}\\n\\nسياق قاعدة المعرفة:\\n${context}\\n\\nإذا لم توجد مصادر، لا تقدم رقماً جديداً للقاعدة اعتماداً على الذاكرة فقط.\\nاللغة المطلوبة: ${language}`;
 
     const input = imageData
