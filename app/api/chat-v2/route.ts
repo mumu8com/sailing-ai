@@ -98,6 +98,7 @@ export async function POST(req: Request) {
     }));
 
     const model = process.env.SAILING_AI_MODEL || "gpt-5.6-sol";
+    const webSearch = body.webSearch === true || /\b(ابحث|بحث|مصادر|آخر|اليوم|الآن|حديث|حديثة|current|latest|today|news|source|search)\b/i.test(question);
     const instruction = `${SYSTEM}\\n\\nسياق قاعدة المعرفة:\\n${context}\\n\\nإذا لم توجد مصادر، لا تقدم رقماً جديداً للقاعدة اعتماداً على الذاكرة فقط.\\nاللغة المطلوبة: ${language}`;
 
     const input = imageData
@@ -115,8 +116,10 @@ export async function POST(req: Request) {
       instructions: instruction,
       input,
       max_output_tokens: 1600,
+      ...(webSearch ? { tools: [{ type: "web_search" }] } : {}),
     });
     let answer = extractAnswer(result);
+    const webSources = (result.output || []).flatMap((item: any) => item.content || []).flatMap((part: any) => part.annotations || []).filter((a: any) => a.type === "url_citation").map((a: any) => ({ title: a.title || a.url, url: a.url }));
 
     if (!answer && localHits.length) answer = localHits.map(r => `القاعدة ${r.number} — ${r.topic}: تحتاج تفاصيل الموقف لتحديد التطبيق.`).join("\\n");
 
@@ -134,7 +137,7 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ answer: answer || "المعلومات المتاحة غير كافية.", sources, conversationId, mode: "direct-openai", model });
+    return NextResponse.json({ answer: answer || "المعلومات المتاحة غير كافية.", sources, webSources, conversationId, mode: "direct-openai", model, webSearch });
   } catch (error) {
     console.error("SailRace AI request failed", error);
     return NextResponse.json({ answer: "تعذر تشغيل المساعد حالياً. تحقق من إعداد مفتاح الذكاء الاصطناعي ثم حاول مرة أخرى.", sources: [] }, { status: 503 });
