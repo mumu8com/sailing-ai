@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { generateText, embed } from "ai";
 import { createClient } from "@supabase/supabase-js";
 import { findRules } from "@/lib/rules";
 
@@ -15,8 +14,35 @@ function getClient(req: Request) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) return null;
-  const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  const token = req.headers.get("authorization")?.replace(/^Bearer\\s+/i, "");
   return createClient(url, key, token ? { global: { headers: { Authorization: `Bearer ${token}` } } } : undefined);
+}
+
+async function openai(path: string, body: unknown) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_API_KEY is not configured");
+  const res = await fetch(`https://api.openai.com/v1/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`OpenAI API ${res.status}: ${detail.slice(0, 500)}`);
+  }
+  return res.json();
+}
+
+async function getEmbedding(input: string) {
+  const data = await openai("embeddings", { model: "text-embedding-3-small", input });
+  return data.data?.[0]?.embedding as number[] | undefined;
+}
+
+function extractAnswer(data: any) {
+  return data.output_text ||
+    data.output?.flatMap((x: any) => x.content || []).find((x: any) => x.type === "output_text")?.text ||
+    "";
 }
 
 export async function POST(req: Request) {
@@ -42,23 +68,20 @@ export async function POST(req: Request) {
 
     if (!imageData && supabase && userId) {
       try {
-        const { embedding } = await embed({ model: "openai/text-embedding-3-small", value: question });
-        const { data } = await supabase.rpc("match_rule_chunks", {
-          query_embedding: embedding,
-          match_threshold: 0.30,
-          match_count: 8,
-        });
-        sources = (data || []).map((x: any) => ({
-          id: x.id,
-          ruleId: x.rule_id,
-          documentId: x.document_id,
-          ruleNumber: x.metadata?.rule_number || null,
-          title: x.heading || null,
-          page: x.page_number || null,
-          content: x.content,
-          source: x.metadata?.source || null,
-          similarity: x.similarity,
-        }));
+        const embedding = await getEmbedding(question);
+        if (embedding) {
+          const { data } = await supabase.rpc("match_rule_chunks", {
+            query_embedding: embedding,
+            match_threshold: 0.30,
+            match_count: 8,
+          });
+          sources = (data || []).map((x: any) => ({
+            id: x.id, ruleId: x.rule_id, documentId: x.document_id,
+            ruleNumber: x.metadata?.rule_number || null, title: x.heading || null,
+            page: x.page_number || null, content: x.content,
+            source: x.metadata?.source || null, similarity: x.similarity,
+          }));
+        }
       } catch (e) {
         console.error("RAG retrieval failed", e);
       }
@@ -66,7 +89,7 @@ export async function POST(req: Request) {
 
     const localHits = findRules(question);
     const context = sources.length
-      ? sources.map((s, i) => `[مصدر ${i + 1}] القاعدة ${s.ruleNumber || "غير محددة"} | ${s.title || "بدون عنوان"} | الصفحة ${s.page || "غير محددة"} | ${s.source || "وثيقة القواعد"}\n${s.content}`).join("\n\n")
+      ? sources.map((s, i) => `[مصدر ${i + 1}] القاعدة ${s.ruleNumber || "غير محددة"} | ${s.title || "بدون عنوان"} | الصفحة ${s.page || "غير محددة"} | ${s.source || "وثيقة القواعد"}\\n${s.content}`).join("\\n\\n")
       : "لا توجد مصادر مسترجعة من قاعدة المعرفة لهذا السؤال.";
 
     const recent = messages.slice(-12).map((m: any) => ({
@@ -74,34 +97,28 @@ export async function POST(req: Request) {
       content: String(m.content || ""),
     }));
 
-    const model = process.env.SAILING_AI_MODEL || "openai/gpt-5.6-sol";
-    let answer = "";
+    const model = process.env.SAILING_AI_MODEL || "gpt-5.6-sol";
+    const instruction = `${SYSTEM}\\n\\nسياق قاعدة المعرفة:\\n${context}\\n\\nإذا لم توجد مصادر، لا تقدم رقماً جديداً للقاعدة اعتماداً على الذاكرة فقط.\\nاللغة المطلوبة: ${language}`;
 
-    if (imageData) {
-      const result = await generateText({
-        model,
-        instructions: SYSTEM,
-        messages: [{
+    const input = imageData
+      ? [{
           role: "user",
           content: [
-            { type: "text", text: `اللغة: ${language}\nالوضع: ${mode}\nالسؤال: ${question}\n\nسياق القواعد:\n${context}` },
-            { type: "file", data: imageData, mediaType: imageMime },
+            { type: "input_text", text: `اللغة: ${language}\\nالوضع: ${mode}\\nالسؤال: ${question}\\n\\nسياق القواعد:\\n${context}` },
+            { type: "input_image", image_url: `data:${imageMime};base64,${imageData}` },
           ],
-        }],
-        maxOutputTokens: 1600,
-      });
-      answer = result.text;
-    } else {
-      const result = await generateText({
-        model,
-        instructions: `${SYSTEM}\n\nسياق قاعدة المعرفة:\n${context}\n\nإذا لم توجد مصادر، لا تقدم رقماً جديداً للقاعدة اعتماداً على الذاكرة فقط.\nاللغة المطلوبة: ${language}`,
-        messages: recent,
-        maxOutputTokens: 1600,
-      });
-      answer = result.text;
-    }
+        }]
+      : recent;
 
-    if (!answer && localHits.length) answer = localHits.map(r => `القاعدة ${r.number} — ${r.topic}: تحتاج تفاصيل الموقف لتحديد التطبيق.`).join("\n");
+    const result = await openai("responses", {
+      model,
+      instructions: instruction,
+      input,
+      max_output_tokens: 1600,
+    });
+    let answer = extractAnswer(result);
+
+    if (!answer && localHits.length) answer = localHits.map(r => `القاعدة ${r.number} — ${r.topic}: تحتاج تفاصيل الموقف لتحديد التطبيق.`).join("\\n");
 
     if (supabase && userId) {
       if (!conversationId) {
@@ -117,9 +134,9 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ answer: answer || "المعلومات المتاحة غير كافية.", sources, conversationId, mode: "rag-ai", model });
+    return NextResponse.json({ answer: answer || "المعلومات المتاحة غير كافية.", sources, conversationId, mode: "direct-openai", model });
   } catch (error) {
     console.error("SailRace AI request failed", error);
-    return NextResponse.json({ answer: "تعذر تشغيل المساعد حالياً. حاول مرة أخرى.", sources: [] }, { status: 503 });
+    return NextResponse.json({ answer: "تعذر تشغيل المساعد حالياً. تحقق من إعداد مفتاح الذكاء الاصطناعي ثم حاول مرة أخرى.", sources: [] }, { status: 503 });
   }
 }
